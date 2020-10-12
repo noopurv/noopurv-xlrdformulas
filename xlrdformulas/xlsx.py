@@ -90,7 +90,7 @@ def cell_name_to_rowx_colx(cell_name, letter_value=_UPPERCASE_1_REL_INDEX,
     colx = 0
     charx = -1
     try:
-        for c in cell_name.upper():
+        for c in cell_name:
             charx += 1
             lv = letter_value[c]
             if lv:
@@ -351,7 +351,7 @@ class X12Book(X12General):
             self.dump_elem(elem)
         nobj = Name()
         bk = self.bk
-        nobj.book = bk
+        nobj.bk = bk
         nobj.name_index = len(bk.name_obj_list)
         bk.name_obj_list.append(nobj)
         nobj.name = elem.get('name')
@@ -390,12 +390,11 @@ class X12Book(X12General):
         state = elem.get('state')
         visibility_map = {
             None: 0,
-            'show': 0,
             'visible': 0,
             'hidden': 1,
             'veryHidden': 2,
         }
-        bk._sheet_visibility.append(visibility_map.get(state, 0))
+        bk._sheet_visibility.append(visibility_map[state])
         sheet = Sheet(bk, position=None, name=name, number=sheetx)
         sheet.utter_max_rows = X12_MAX_ROWS
         sheet.utter_max_cols = X12_MAX_COLS
@@ -655,7 +654,7 @@ class X12Sheet(X12General):
                 colx = 0
                 charx = -1
                 try:
-                    for c in cell_name.upper():
+                    for c in cell_name:
                         charx += 1
                         if c == '$':
                             continue
@@ -826,16 +825,12 @@ def open_workbook_2007_xml(zf,
         # seen in MS sample file MergedCells.xlsx
         pass
 
+    sst_fname = 'xl/sharedstrings.xml'
     x12sst = X12SST(bk, logfile, verbosity)
-
-    # Different versions place the shared strings file in different locations.
-    # It's easier to check for each instead fo parsing XML to find a specific path reference.
-    sst_fname_candidates = ['xl/sharedstrings.xml', 'sharedstrings.xml']
-    for sst_fname in sst_fname_candidates:
-        if sst_fname in component_names:
-            zflo = zf.open(component_names[sst_fname])
-            x12sst.process_stream(zflo, 'SST')
-            del zflo
+    if sst_fname in component_names:
+        zflo = zf.open(component_names[sst_fname])
+        x12sst.process_stream(zflo, 'SST')
+        del zflo
 
     for sheetx in range(bk.nsheets):
         fname = x12book.sheet_targets[sheetx]

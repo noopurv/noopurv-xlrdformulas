@@ -38,9 +38,7 @@ def open_workbook(filename=None,
                   encoding_override=None,
                   formatting_info=False,
                   on_demand=False,
-                  ragged_rows=False,
-                  ignore_workbook_corruption=False
-                  ):
+                  ragged_rows=False):
     """
     Open a spreadsheet file for data extraction.
 
@@ -102,13 +100,6 @@ def open_workbook(filename=None,
       This can result in substantial memory savings if rows are of widely
       varying sizes. See also the :meth:`~xlrd.sheet.Sheet.row_len` method.
 
-
-    :param ignore_workbook_corruption:
-
-      This option allows to read corrupted workbooks.
-      When ``False`` you may face CompDocError: Workbook corruption.
-      When ``True`` that exception will be ignored.
-
     :returns: An instance of the :class:`~xlrd.book.Book` class.
     """
 
@@ -154,6 +145,7 @@ def open_workbook(filename=None,
         raise XLRDError('ZIP file contents not a known type of workbook')
 
     from . import book
+    print("hello")
     bk = book.open_workbook_xls(
         filename=filename,
         logfile=logfile,
@@ -164,7 +156,6 @@ def open_workbook(filename=None,
         formatting_info=formatting_info,
         on_demand=on_demand,
         ragged_rows=ragged_rows,
-        ignore_workbook_corruption=ignore_workbook_corruption,
     )
     return bk
 

@@ -19,6 +19,7 @@ from .biffh import (
     unpack_string_update_pos, unpack_unicode_update_pos,
 )
 from .timemachine import *
+import numpy as np
 
 __all__ = [
     'oBOOL', 'oERR', 'oNUM', 'oREF', 'oREL', 'oSTRG', 'oUNK',
@@ -405,7 +406,7 @@ def do_box_funcs(box_funcs, boxa, boxb):
         for func, numa, numb in zip(box_funcs, boxa.coords, boxb.coords)
     )
 
-def adjust_cell_addr_biff8(rowval, colval, reldelta, browx=None, bcolx=None):
+def adjust_cell_addr_biff8(rowval, colval, reldelta, browx=0, bcolx=0):
     row_rel = (colval >> 15) & 1
     col_rel = (colval >> 14) & 1
     rowx = rowval
@@ -423,7 +424,7 @@ def adjust_cell_addr_biff8(rowval, colval, reldelta, browx=None, bcolx=None):
     return rowx, colx, row_rel, col_rel
 
 def adjust_cell_addr_biff_le7(
-        rowval, colval, reldelta, browx=None, bcolx=None):
+        rowval, colval, reldelta, browx=0, bcolx=0):
     row_rel = (rowval >> 15) & 1
     col_rel = (rowval >> 14) & 1
     rowx = rowval & 0x3fff
@@ -440,7 +441,7 @@ def adjust_cell_addr_biff_le7(
             colx -= bcolx
     return rowx, colx, row_rel, col_rel
 
-def get_cell_addr(data, pos, bv, reldelta, browx=None, bcolx=None):
+def get_cell_addr(data, pos, bv, reldelta, browx=0, bcolx=0):
     if bv >= 80:
         rowval, colval = unpack("<HH", data[pos:pos+4])
         # print "    rv=%04xh cv=%04xh" % (rowval, colval)
@@ -451,7 +452,7 @@ def get_cell_addr(data, pos, bv, reldelta, browx=None, bcolx=None):
         return adjust_cell_addr_biff_le7(
                     rowval, colval, reldelta, browx, bcolx)
 
-def get_cell_range_addr(data, pos, bv, reldelta, browx=None, bcolx=None):
+def get_cell_range_addr(data, pos, bv, reldelta, browx=0, bcolx=0):
     if bv >= 80:
         row1val, row2val, col1val, col2val = unpack("<HHHH", data[pos:pos+8])
         # print "    rv=%04xh cv=%04xh" % (row1val, col1val)
@@ -1327,7 +1328,7 @@ def evaluate_name_formula(bk, nobj, namex, blah=0, level=0):
                     res.text = "%s!%s" \
                                % (bk._sheet_names[tgtobj.scope], tgtobj.name)
                 if blah:
-                    print("    tNameX: setting text to", repr(res.text), file=bk.logfile)
+                    print(" tNameX: setting text to", repr(res.text), file=bk.logfile)
             spush(res)
         elif opcode in error_opcodes:
             any_err = 1
@@ -1359,15 +1360,20 @@ def evaluate_name_formula(bk, nobj, namex, blah=0, level=0):
 #### under construction #############################################################################
 def decompile_formula(bk, fmla, fmlalen,
                       fmlatype=None, browx=None, bcolx=None,
-                      blah=0, level=0, r1c1=0):
+                      blah=1, level=0, r1c1=0 ,row=0,col=0,sheet_name=None):
+    print(sheet_name)
     if level > STACK_ALARM_LEVEL:
         blah = 1
     reldelta = fmlatype in (FMLA_TYPE_SHARED, FMLA_TYPE_NAME, FMLA_TYPE_COND_FMT, FMLA_TYPE_DATA_VAL)
     data = fmla
+    print("FML")
+    print(fmla)
+    formula_dict=()
     bv = bk.biff_version
     if blah:
-        print("::: decompile_formula len=%d fmlatype=%r browx=%r bcolx=%r reldelta=%d %r level=%d"
-            % (fmlalen, fmlatype, browx, bcolx, reldelta, data, level), file=bk.logfile)
+        # print("::: decompile_formula len=%d fmlatype=%r browx=%r bcolx=%r reldelta=%d %r level=%d"
+        #     % (fmlalen, fmlatype, browx, bcolx, reldelta, data, level), file=bk.logfile)
+
         hex_char_dump(data, 0, fmlalen, fout=bk.logfile)
     if level > STACK_PANIC_LEVEL:
         raise XLRDError("Excessive indirect references in formula")
@@ -1395,6 +1401,7 @@ def decompile_formula(bk, fmla, fmlalen,
             ')'[:bop.rank < rank],
         ])
         resop = Operand(result_kind, None, rank, otext)
+        print(resop.text)
         stk.append(resop)
 
     def do_unaryop(opcode, result_kind, stk):
@@ -1429,6 +1436,7 @@ def decompile_formula(bk, fmla, fmlalen,
             opx = opcode
         oname = onames[opx] # + [" RVA"][optype]
         sz = sztab[opx]
+
         if blah:
             print("Pos:%d Op:0x%02x opname:t%s Sz:%d opcode:%02xh optype:%02xh"
                 % (pos, op, oname, sz, opcode, optype), file=bk.logfile)
@@ -1455,6 +1463,7 @@ def decompile_formula(bk, fmla, fmlalen,
                 # Add, Sub, Mul, Div, Power
                 # tConcat
                 # tLT, ..., tNE
+                print("HDGFFDGDFGDF")
                 do_binop(opcode, stack)
             elif opcode == 0x0F: # tIsect
                 if blah: print("tIsect pre", stack, file=bk.logfile)
@@ -1870,6 +1879,7 @@ def decompile_formula(bk, fmla, fmlalen,
         pos += sz
     any_rel = not not any_rel
     if blah:
+
         print("End of formula. level=%d any_rel=%d any_err=%d stack=%r" %
             (level, not not any_rel, any_err, stack), file=bk.logfile)
         if len(stack) >= 2:
@@ -1879,8 +1889,12 @@ def decompile_formula(bk, fmla, fmlalen,
     if len(stack) != 1:
         result = None
     else:
-        result = stack[0].text
-    return result
+        if(not stack[0].text.startswith("SH")):
+            tempst = "=" + stack[0].text
+            result = ((browx, bcolx), tempst)
+        else:
+            result= None
+    return fmla,result
 
 #### under deconstruction ###
 def dump_formula(bk, data, fmlalen, bv, reldelta, blah=0, isname=0):
@@ -2038,6 +2052,7 @@ def dump_formula(bk, data, fmlalen, bv, reldelta, blah=0, isname=0):
             (not not any_rel, any_err, stack), file=bk.logfile)
         if len(stack) >= 2:
             print("*** Stack has unprocessed args", file=bk.logfile)
+
 
 # === Some helper functions for displaying cell references ===
 

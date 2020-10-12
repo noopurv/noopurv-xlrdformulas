@@ -14,6 +14,7 @@ from .formula import (
     FMLA_TYPE_CELL, FMLA_TYPE_SHARED, decompile_formula, dump_formula,
     rangename2d,
 )
+import numpy as np
 from .timemachine import *
 
 DEBUG = 0
@@ -316,6 +317,8 @@ class Sheet(BaseObject):
     #: .. versionadded:: 0.7.2
     vertical_page_breaks = []
 
+    formula_array = []
+
     def __init__(self, book, position, name, number):
         self.book = book
         self.biff_version = book.biff_version
@@ -368,6 +371,7 @@ class Sheet(BaseObject):
         self.hyperlink_list = []
         self.hyperlink_map = {}
         self.cell_note_map = {}
+
 
         # Values calculated by xlrd to predict the mag factors that
         # will actually be used by Excel to display your worksheet.
@@ -476,26 +480,9 @@ class Sheet(BaseObject):
             for colx in xrange(len(self._cell_values[rowx]))
         ]
 
-    def __getitem__(self, item):
-        """
-        Takes either rowindex or (rowindex, colindex) as an index,
-        and returns either row or cell respectively.
-        """
-        try:
-            rowix, colix = item
-        except TypeError:
-            # it's not a tuple (or of right size), let's try indexing as is
-            # if this is a problem, let this error propagate back
-            return self.row(item)
-        else:
-            return self.cell(rowix, colix)
-
     def get_rows(self):
         "Returns a generator for iterating through each row."
         return (self.row(index) for index in range(self.nrows))
-
-    # makes `for row in sheet` natural and intuitive
-    __iter__ = get_rows
 
     def row_types(self, rowx, start_colx=0, end_colx=None):
         """
@@ -738,7 +725,7 @@ class Sheet(BaseObject):
                 if nr < self.nrows:
                     # cell data is not in non-descending row order *AND*
                     # self.ncols has been bumped up.
-                    # This very rare case ruins this optimisation.
+                    # This very rare case ruins this optmisation.
                     self._first_full_rowx = -2
                 elif rowx > self._first_full_rowx > -2:
                     self._first_full_rowx = rowx
@@ -787,10 +774,10 @@ class Sheet(BaseObject):
 
     def read(self, bk):
         global rc_stats
-        DEBUG = 0
+        DEBUG = 1
         blah = DEBUG or self.verbosity >= 2
         blah_rows = DEBUG or self.verbosity >= 4
-        blah_formulas = 0 and blah
+        blah_formulas = 1 and blah
         r1c1 = 0
         oldpos = bk._position
         bk._position = self._position
@@ -807,6 +794,9 @@ class Sheet(BaseObject):
         rowinfo_sharing_dict = {}
         txos = {}
         eof_found = 0
+        formula_dict=[]
+
+
         while 1:
             # if DEBUG: print "SHEET.READ: about to read from position %d" % bk._position
             rc, data_len, data = bk_get_record_parts()
@@ -926,8 +916,7 @@ class Sheet(BaseObject):
                     r.dump(self.logfile,
                         header="--- sh #%d, rowx=%d ---" % (self.number, rowx))
             elif rc in XL_FORMULA_OPCODES: # 06, 0206, 0406
-                # DEBUG = 1
-                # if DEBUG: print "FORMULA: rc: 0x%04x data: %r" % (rc, data)
+                #print ("FORMULA: rc: 0x%04x data: %r" % (rc, data))
                 if bv >= 50:
                     rowx, colx, xf_index, result_str, flags = local_unpack('<HHH8sH', data[0:16])
                 elif bv >= 30:
@@ -935,12 +924,18 @@ class Sheet(BaseObject):
                 else: # BIFF2
                     rowx, colx, cell_attr,  result_str, flags = local_unpack('<HH3s8sB', data[0:16])
                     xf_index =  self.fixed_BIFF2_xfindex(cell_attr, rowx, colx)
-                if blah_formulas: # testing formula dumper
-                    #### XXXX FIXME
-                    fprintf(self.logfile, "FORMULA: rowx=%d colx=%d\n", rowx, colx)
-                    fmlalen = local_unpack("<H", data[20:22])[0]
-                    decompile_formula(bk, data[22:], fmlalen, FMLA_TYPE_CELL,
-                        browx=rowx, bcolx=colx, blah=1, r1c1=r1c1)
+
+                try:
+                  if blah_formulas: # testing formula dumper
+                      #### XXXX FIXME
+                        fprintf(self.logfile, "FORMULA: rowx=%d colx=%d\n", rowx, colx)
+                        fmlalen = local_unpack("<H", data[20:22])[0]
+                        ff,form = decompile_formula(bk, data[22:], fmlalen, FMLA_TYPE_CELL,
+                          browx=rowx, bcolx=colx, blah=1, r1c1=r1c1,row=self.nrows,col=self.ncols,sheet_name=self.name)
+                        if (form is not None):
+                            formula_dict.append(form)
+                except:
+                    print("formula failed")
                 if result_str[6:8] == b"\xFF\xFF":
                     first_byte = BYTES_ORD(result_str[0])
                     if first_byte == 0:
@@ -955,31 +950,39 @@ class Sheet(BaseObject):
                             elif rc2 == XL_ARRAY:
                                 row1x, rownx, col1x, colnx, array_flags, tokslen = \
                                     local_unpack("<HHBBBxxxxxH", data2[:14])
-                                if blah_formulas:
-                                    fprintf(self.logfile, "ARRAY: %d %d %d %d %d\n",
-                                        row1x, rownx, col1x, colnx, array_flags)
-                                    # dump_formula(bk, data2[14:], tokslen, bv, reldelta=0, blah=1)
+                                try:
+                                  if blah_formulas:
+                                      fprintf(self.logfile, "ARRAY: %d %d %d %d %d\n",
+                                          row1x, rownx, col1x, colnx, array_flags)
+                                      dump_formula(bk, data2[14:], tokslen, bv, reldelta=0, blah=1)
+                                except:
+                                    print("formula failed")
                             elif rc2 == XL_SHRFMLA:
                                 row1x, rownx, col1x, colnx, nfmlas, tokslen = \
                                     local_unpack("<HHBBxBH", data2[:10])
-                                if blah_formulas:
-                                    fprintf(self.logfile, "SHRFMLA (sub): %d %d %d %d %d\n",
-                                        row1x, rownx, col1x, colnx, nfmlas)
-                                    decompile_formula(bk, data2[10:], tokslen, FMLA_TYPE_SHARED,
-                                        blah=1, browx=rowx, bcolx=colx, r1c1=r1c1)
+                                try:
+                                  if blah_formulas:
+                                      fprintf(self.logfile, "SHRFMLA (sub): %d %d %d %d %d\n",
+                                          row1x, rownx, col1x, colnx, nfmlas)
+                                      ff,form= decompile_formula(bk, data2[10:], tokslen, FMLA_TYPE_SHARED,
+                                         blah=1, browx=rowx, bcolx=colx, r1c1=r1c1,sheet_name=self.name)
+                                      if (form is not None):
+                                          formula_dict.append(form)
+                                except:
+                                    print("formula failed")
+
                             elif rc2 not in XL_SHRFMLA_ETC_ETC:
                                 raise XLRDError(
                                     "Expected SHRFMLA, ARRAY, TABLEOP* or STRING record; found 0x%04x" % rc2)
-                            # if DEBUG: print "gotstring:", gotstring
+                            if DEBUG: print("gotstring:", gotstring)
                         # now for the STRING record
                         if not gotstring:
                             rc2, _unused_len, data2 = bk.get_record_parts()
                             if rc2 not in (XL_STRING, XL_STRING_B2):
                                 raise XLRDError("Expected STRING record; found 0x%04x" % rc2)
-                        # if DEBUG: print "STRING: data=%r BIFF=%d cp=%d" % (data2, self.biff_version, bk.encoding)
+                        #print("STRING: data=%r BIFF=%d cp=%d" % (data2, self.biff_version, bk.encoding))
                         strg = self.string_record_contents(data2)
                         self.put_cell(rowx, colx, XL_CELL_TEXT, strg, xf_index)
-                        # if DEBUG: print "FORMULA strg %r" % strg
                     elif first_byte == 1:
                         # boolean formula result
                         value = BYTES_ORD(result_str[2])
@@ -1156,10 +1159,16 @@ class Sheet(BaseObject):
             elif rc == XL_SHRFMLA:
                 row1x, rownx, col1x, colnx, nfmlas, tokslen = \
                     local_unpack("<HHBBxBH", data[:10])
-                if blah_formulas:
-                    print("SHRFMLA (main):", row1x, rownx, col1x, colnx, nfmlas, file=self.logfile)
-                    decompile_formula(bk, data[10:], tokslen, FMLA_TYPE_SHARED,
-                        blah=1, browx=rowx, bcolx=colx, r1c1=r1c1)
+                try:
+                  if blah_formulas:
+                      print("SHRFMLA (main):", row1x, rownx, col1x, colnx, nfmlas, file=self.logfile)
+                      ff,form= decompile_formula(bk, data[10:], tokslen, FMLA_TYPE_SHARED,
+                          blah=1, browx=rowx, bcolx=colx, r1c1=r1c1,sheet_name=self.name)
+                      if(form is not None):
+                        formula_dict.append(form)
+                except:
+                    print("formula failed")
+
             elif rc == XL_CONDFMT:
                 if not fmt_info: continue
                 assert bv >= 80
@@ -1504,7 +1513,8 @@ class Sheet(BaseObject):
         self.tidy_dimensions()
         self.update_cooked_mag_factors()
         bk._position = oldpos
-        return 1
+        print(formula_dict)
+        return formula_dict
 
     def string_record_contents(self, data):
         bv = self.biff_version
@@ -2107,9 +2117,6 @@ class Sheet(BaseObject):
                 lt, idList, crwHeader, crwTotals, idFieldNext, cbFSData,
                 rupBuild, unusedShort,listFlags, lPosStmCache, cbStmCache,
                 cchStmCache, lem, rgbHashParam, cchName), file=self.logfile)
-
-    def __repr__(self):
-        return "Sheet {:>2}:<{}>".format(self.number, self.name)
 
 
 class MSODrawing(BaseObject):
